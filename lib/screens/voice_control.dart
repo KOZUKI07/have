@@ -4,6 +4,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:http/http.dart' as http;
 import 'dart:convert';
 import 'dart:io';
+import 'dart:async';
 
 class VoiceControlPage extends StatefulWidget {
   final String backendURL;
@@ -22,6 +23,8 @@ class _VoiceControlPageState extends State<VoiceControlPage> {
 
   Process? _recognitionProcess;
   Process? _ttsProcess;
+  Timer? _listeningTimer;
+  Process? _arecordProcess;
 
   @override
   void initState() {
@@ -340,7 +343,7 @@ class _VoiceControlPageState extends State<VoiceControlPage> {
       }
 
       // Use espeak for text-to-speech on Linux
-      _ttsProcess = await Process.start('espeak', ['-ven+f3', '"$text"']);
+      _ttsProcess = await Process.start('espeak', ['-ven+f3', text]);
     } catch (e) {
       print('Error with TTS: $e');
       ScaffoldMessenger.of(context).showSnackBar(
@@ -357,24 +360,37 @@ class _VoiceControlPageState extends State<VoiceControlPage> {
 
     try {
       // Stop any existing recognition process
-      if (_recognitionProcess != null) {
-        _recognitionProcess!.kill();
-        _recognitionProcess = null;
-      }
+      await _stopListening();
 
-      // Use arecord for audio capture and pocketsphinx_continuous for speech recognition
-      final arecord = await Process.start(
-        'arecord',
-        ['-t', 'raw', '-f', 'S16_LE', '-r', '16000', '-c', '1'],
-      );
-      
-      _recognitionProcess = await Process.start(
-        'pocketsphinx_continuous',
-        ['-inmic', 'yes', '-time', 'yes', '-logfn', '/dev/null'],
-      );
+      // Create FIFO pipe
+      final fifoPath = '/tmp/voice_fifo';
+      await Process.run('rm', ['-f', fifoPath]);
+      await Process.run('mkfifo', [fifoPath]);
 
-      // Pipe audio from arecord to pocketsphinx
-      arecord.stdout.pipe(_recognitionProcess!.stdin);
+      // Start arecord to capture audio to FIFO
+      _arecordProcess = await Process.start('arecord', [
+        '-t',
+        'raw',
+        '-f',
+        'S16_LE',
+        '-r',
+        '16000',
+        '-c',
+        '1',
+        '-D',
+        'plughw:0,0', // Updated to use plughw:0,0
+        fifoPath
+      ]);
+
+      // Start pocketsphinx to read from FIFO
+      _recognitionProcess = await Process.start('pocketsphinx_continuous', [
+        '-infile',
+        fifoPath,
+        '-time',
+        'yes',
+        '-logfn',
+        '/dev/null'
+      ]);
 
       // Listen for output from pocketsphinx
       _recognitionProcess!.stdout
@@ -389,7 +405,7 @@ class _VoiceControlPageState extends State<VoiceControlPage> {
       });
 
       // Set timeout for listening
-      Future.delayed(const Duration(seconds: 6), () async {
+      _listeningTimer = Timer(const Duration(seconds: 6), () async {
         await _stopListening();
         if (_spokenText.isNotEmpty && _spokenText != "Listening...") {
           _processVoiceCommand(_spokenText);
@@ -410,11 +426,20 @@ class _VoiceControlPageState extends State<VoiceControlPage> {
 
   Future<void> _stopListening() async {
     setState(() => _isListening = false);
+    _listeningTimer?.cancel();
     
     if (_recognitionProcess != null) {
       _recognitionProcess!.kill();
       _recognitionProcess = null;
     }
+    
+    if (_arecordProcess != null) {
+      _arecordProcess!.kill();
+      _arecordProcess = null;
+    }
+    
+    // Clean up FIFO
+    await Process.run('rm', ['-f', '/tmp/voice_fifo']);
   }
 
   @override
