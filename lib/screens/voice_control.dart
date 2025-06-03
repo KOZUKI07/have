@@ -30,6 +30,25 @@ class _VoiceControlPageState extends State<VoiceControlPage> {
   void initState() {
     super.initState();
     _loadCameraIDs();
+    _testAudioInput();  // Test microphone on startup
+  }
+
+  Future<void> _testAudioInput() async {
+    try {
+      final result = await Process.run(
+        'arecord', 
+        ['-d', '2', '--format=S16_LE', '--rate=16000', '--file-type=raw', '/dev/null']
+      );
+      if (result.exitCode != 0) {
+        setState(() {
+          _audioError = true;
+        });
+        await _speak("Microphone not detected. Please check audio settings.");
+      }
+    } catch (e) {
+      setState(() => _audioError = true);
+      print('Audio test failed: $e');
+    }
   }
 
   Future<void> _loadCameraIDs() async {
@@ -332,6 +351,11 @@ class _VoiceControlPageState extends State<VoiceControlPage> {
   }
 
   Future<void> _listenVoiceCommand() async {
+    if (_audioError) {
+      await _speak("Microphone error. Please check audio settings.");
+      return;
+    }
+
     setState(() {
       _isListening = true;
       _spokenText = "Listening...";
@@ -341,15 +365,33 @@ class _VoiceControlPageState extends State<VoiceControlPage> {
     try {
       await _stopListening();
 
-      // Start PocketSphinx with direct microphone access
+      // Initialize audio system
+      try {
+        await Process.run('pulseaudio', ['--start']);
+        await Process.run('pacmd', ['set-default-source', 'alsa_input.pci-0000_00_1f.3.analog-stereo']);
+      } catch (e) {
+        print('Audio init error: $e');
+      }
+
+      // Start PocketSphinx with improved parameters
       _recognitionProcess = await Process.start('pocketsphinx_continuous', [
         '-inmic',
         'yes',
-        '-time',
-        'yes',
-        '-logfn',
-        '/dev/null',
+        '-adcdev', 'default',
+        '-time', 'yes',
+        '-logfn', '/dev/null',
+        '-kws_threshold', '1e-20',
       ]);
+
+      // Capture process exit code
+      _recognitionProcess!.exitCode.then((code) {
+        if (code != 0) {
+          setState(() {
+            _audioError = true;
+            _spokenText = "Recognition error";
+          });
+        }
+      });
 
       // Debug output
       _recognitionProcess!.stderr.transform(utf8.decoder).listen((data) {
@@ -368,21 +410,23 @@ class _VoiceControlPageState extends State<VoiceControlPage> {
           .transform(const LineSplitter())
           .listen((line) {
         print('PocketSphinx: $line');
-        if (line.startsWith('READY....')) return;
-        if (line.contains(':')) {
+        
+        if (line.contains('detected')) {
+          final startIndex = line.indexOf('detected') + 9;
+          setState(() => _spokenText = line.substring(startIndex).trim());
+        }
+        else if (line.contains(':')) {
           final parts = line.split(':');
           if (parts.length > 1) {
             setState(() => _spokenText = parts[1].trim());
           } else {
             setState(() => _spokenText = line);
           }
-        } else {
-          setState(() => _spokenText = line);
         }
       });
 
-      // Set timeout
-      _listeningTimer = Timer(const Duration(seconds: 6), () async {
+      // Set longer timeout
+      _listeningTimer = Timer(const Duration(seconds: 15), () async {
         await _stopListening();
         if (_spokenText.isNotEmpty && 
             _spokenText != "Listening..." && 
@@ -397,7 +441,8 @@ class _VoiceControlPageState extends State<VoiceControlPage> {
       print('Error with speech recognition: $e');
       setState(() {
         _isListening = false;
-        _spokenText = "Error: Speech recognition failed";
+        _audioError = true;
+        _spokenText = "Recognition failed";
       });
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text('Speech recognition error: $e')),
@@ -410,7 +455,6 @@ class _VoiceControlPageState extends State<VoiceControlPage> {
     _listeningTimer?.cancel();
 
     if (_recognitionProcess != null) {
-      // Send SIGINT for graceful termination
       _recognitionProcess!.kill(ProcessSignal.sigint);
       await Future.delayed(const Duration(milliseconds: 500));
       if (_recognitionProcess != null) {
@@ -491,9 +535,9 @@ class _VoiceControlPageState extends State<VoiceControlPage> {
                             height: isLargeScreen ? 180 : 120,
                             decoration: BoxDecoration(
                               shape: BoxShape.circle,
-                              color: _isListening 
-                                  ? _audioError ? Colors.orange : Colors.greenAccent 
-                                  : Colors.tealAccent,
+                              color: _audioError 
+                                  ? Colors.orange 
+                                  : (_isListening ? Colors.greenAccent : Colors.tealAccent),
                               boxShadow: _isListening
                                   ? [
                                       BoxShadow(
@@ -507,11 +551,17 @@ class _VoiceControlPageState extends State<VoiceControlPage> {
                                     ]
                                   : [],
                             ),
-                            child: Icon(
-                              Icons.mic,
-                              size: isLargeScreen ? 70 : 50,
-                              color: Colors.black,
-                            ),
+                            child: _audioError
+                                ? const Icon(
+                                    Icons.warning,
+                                    size: 50,
+                                    color: Colors.black,
+                                  )
+                                : const Icon(
+                                    Icons.mic,
+                                    size: 50,
+                                    color: Colors.black,
+                                  ),
                           ),
                         ),
                       ),
@@ -525,7 +575,9 @@ class _VoiceControlPageState extends State<VoiceControlPage> {
                           borderRadius: BorderRadius.circular(16),
                         ),
                         child: Text(
-                          _spokenText.isEmpty ? "Say a command..." : _spokenText,
+                          _spokenText.isEmpty 
+                              ? (_audioError ? "Audio device error!" : "Say a command...") 
+                              : _spokenText,
                           textAlign: TextAlign.center,
                           style: TextStyle(
                             color: _audioError ? Colors.orange : Colors.white,
