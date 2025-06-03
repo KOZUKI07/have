@@ -1,10 +1,9 @@
 import 'package:flutter/material.dart';
-import 'package:flutter_tts/flutter_tts.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:shared_preferences/shared_preferences.dart';
-import 'package:speech_to_text/speech_to_text.dart' as stt;
 import 'package:http/http.dart' as http;
 import 'dart:convert';
+import 'dart:io';
 
 class VoiceControlPage extends StatefulWidget {
   final String backendURL;
@@ -15,32 +14,19 @@ class VoiceControlPage extends StatefulWidget {
 }
 
 class _VoiceControlPageState extends State<VoiceControlPage> {
-  late stt.SpeechToText _speech;
-  late FlutterTts _tts;
   bool _isListening = false;
   String _spokenText = "";
 
   List<String> cameraIDs = [];
   String? selectedCam;
 
+  Process? _recognitionProcess;
+  Process? _ttsProcess;
+
   @override
   void initState() {
     super.initState();
-    _speech = stt.SpeechToText();
-    _tts = FlutterTts();
-    _initializeTts();
     _loadCameraIDs();
-  }
-
-  Future<void> _initializeTts() async {
-    await _tts.setLanguage("en-US");
-    await _tts.setSpeechRate(0.5);
-    await _tts.setVolume(1.0);
-    await _tts.setPitch(1.0);
-  }
-
-  Future<void> _speak(String text) async {
-    await _tts.speak(text);
   }
 
   Future<void> _loadCameraIDs() async {
@@ -54,9 +40,9 @@ class _VoiceControlPageState extends State<VoiceControlPage> {
 
   Future<void> _sendCommand(String cmd) async {
     if (cameraIDs.isEmpty) {
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(const SnackBar(content: Text('No camera devices found')));
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('No camera devices found')),
+      );
       return;
     }
 
@@ -173,9 +159,9 @@ class _VoiceControlPageState extends State<VoiceControlPage> {
     if (lightMatch != null) {
       final lightNumber = int.tryParse(lightMatch.group(1)!);
       if (lightNumber == null || lightNumber < 1 || lightNumber > 3) {
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(const SnackBar(content: Text('No such light')));
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('No such light')),
+        );
         await _speak("Sorry, no such light");
         return;
       }
@@ -345,31 +331,98 @@ class _VoiceControlPageState extends State<VoiceControlPage> {
     setState(() => _spokenText = "");
   }
 
-  Future<void> _listenVoiceCommand() async {
-    bool available = await _speech.initialize();
-    if (available) {
-      setState(() => _isListening = true);
-      _speech.listen(
-        onResult:
-            (result) => setState(() => _spokenText = result.recognizedWords),
-      );
+  Future<void> _speak(String text) async {
+    try {
+      // Stop any existing TTS process
+      if (_ttsProcess != null) {
+        _ttsProcess!.kill();
+        _ttsProcess = null;
+      }
 
-      Future.delayed(const Duration(seconds: 6), () {
-        _stopListening();
-        if (_spokenText.isNotEmpty) _processVoiceCommand(_spokenText);
-        setState(() => _spokenText = "");
-      });
+      // Use espeak for text-to-speech on Linux
+      _ttsProcess = await Process.start('espeak', ['-ven+f3', '"$text"']);
+    } catch (e) {
+      print('Error with TTS: $e');
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Text-to-speech error: $e')),
+      );
     }
   }
 
-  void _stopListening() {
-    _speech.stop();
+  Future<void> _listenVoiceCommand() async {
+    setState(() {
+      _isListening = true;
+      _spokenText = "Listening...";
+    });
+
+    try {
+      // Stop any existing recognition process
+      if (_recognitionProcess != null) {
+        _recognitionProcess!.kill();
+        _recognitionProcess = null;
+      }
+
+      // Use arecord for audio capture and pocketsphinx_continuous for speech recognition
+      final arecord = await Process.start(
+        'arecord',
+        ['-t', 'raw', '-f', 'S16_LE', '-r', '16000', '-c', '1'],
+      );
+      
+      _recognitionProcess = await Process.start(
+        'pocketsphinx_continuous',
+        ['-inmic', 'yes', '-time', 'yes', '-logfn', '/dev/null'],
+      );
+
+      // Pipe audio from arecord to pocketsphinx
+      arecord.stdout.pipe(_recognitionProcess!.stdin);
+
+      // Listen for output from pocketsphinx
+      _recognitionProcess!.stdout
+          .transform(utf8.decoder)
+          .transform(const LineSplitter())
+          .listen((line) {
+        if (line.startsWith('READY....')) return;
+        if (line.contains('000000000: ')) {
+          final text = line.split(': ')[1].trim();
+          setState(() => _spokenText = text);
+        }
+      });
+
+      // Set timeout for listening
+      Future.delayed(const Duration(seconds: 6), () async {
+        await _stopListening();
+        if (_spokenText.isNotEmpty && _spokenText != "Listening...") {
+          _processVoiceCommand(_spokenText);
+        }
+        setState(() => _spokenText = "");
+      });
+    } catch (e) {
+      print('Error with speech recognition: $e');
+      setState(() {
+        _isListening = false;
+        _spokenText = "Error: Speech recognition failed";
+      });
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Speech recognition error: $e')),
+      );
+    }
+  }
+
+  Future<void> _stopListening() async {
     setState(() => _isListening = false);
+    
+    if (_recognitionProcess != null) {
+      _recognitionProcess!.kill();
+      _recognitionProcess = null;
+    }
   }
 
   @override
   void dispose() {
-    _tts.stop();
+    _stopListening();
+    if (_ttsProcess != null) {
+      _ttsProcess!.kill();
+    }
     super.dispose();
   }
 
@@ -382,7 +435,7 @@ class _VoiceControlPageState extends State<VoiceControlPage> {
       backgroundColor: Colors.black,
       appBar: AppBar(
         title: Text(
-          'VOICE CONTROL',
+          'VOICE CONTROL (Linux)',
           style: GoogleFonts.orbitron(
             fontSize: isLargeScreen ? 28 : 20,
             fontWeight: FontWeight.bold,
@@ -488,6 +541,20 @@ class _VoiceControlPageState extends State<VoiceControlPage> {
                             style: TextStyle(
                               color: Colors.grey[500],
                               fontSize: 20,
+                              fontStyle: FontStyle.italic,
+                            ),
+                          ),
+                        ),
+                      ),
+                    if (isLargeScreen)
+                      Center(
+                        child: Padding(
+                          padding: const EdgeInsets.only(bottom: 10),
+                          child: Text(
+                            'Using PocketSphinx & eSpeak',
+                            style: TextStyle(
+                              color: Colors.grey[700],
+                              fontSize: 16,
                               fontStyle: FontStyle.italic,
                             ),
                           ),
