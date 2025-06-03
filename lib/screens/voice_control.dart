@@ -33,15 +33,24 @@ class _VoiceControlPageState extends State<VoiceControlPage> {
     _testAudioInput();
   }
 
+  // In _testAudioInput()
   Future<void> _testAudioInput() async {
     try {
-      final result = await Process.run(
-        'arecord', 
-        ['--device', 'default', '-d', '1', '--format=S16_LE', '--rate=16000', '--file-type=raw', '/dev/null']
-      );
+      final result = await Process.run('arecord', [
+        '--device',
+        'default',
+        '-d',
+        '1',
+        '--format=S16_LE',
+        '--rate=16000',
+        '--file-type=raw',
+        '/dev/null',
+      ]);
       if (result.exitCode != 0) {
         setState(() => _audioError = true);
         print('Microphone test failed: ${result.stderr}');
+      } else {
+        setState(() => _audioError = false); // Reset error state on success
       }
     } catch (e) {
       setState(() => _audioError = true);
@@ -60,9 +69,9 @@ class _VoiceControlPageState extends State<VoiceControlPage> {
 
   Future<void> _sendCommand(String cmd) async {
     if (cameraIDs.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('No camera devices found')),
-      );
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('No camera devices found')));
       return;
     }
 
@@ -117,11 +126,13 @@ class _VoiceControlPageState extends State<VoiceControlPage> {
         } else if (s1[i - 1] == s2[j - 1]) {
           dp[i][j] = dp[i - 1][j - 1];
         } else {
-          dp[i][j] = 1 + [
-            dp[i - 1][j],
-            dp[i][j - 1],
-            dp[i - 1][j - 1],
-          ].reduce((a, b) => a < b ? a : b);
+          dp[i][j] =
+              1 +
+              [
+                dp[i - 1][j],
+                dp[i][j - 1],
+                dp[i - 1][j - 1],
+              ].reduce((a, b) => a < b ? a : b);
         }
       }
     }
@@ -131,7 +142,7 @@ class _VoiceControlPageState extends State<VoiceControlPage> {
   double _similarity(String s1, String s2) {
     if (s1.isEmpty && s2.isEmpty) return 100.0;
     if (s1.isEmpty || s2.isEmpty) return 0.0;
-    
+
     int distance = _levenshteinDistance(s1, s2);
     int maxLength = s1.length > s2.length ? s1.length : s2.length;
     return (1.0 - distance / maxLength) * 100;
@@ -163,13 +174,18 @@ class _VoiceControlPageState extends State<VoiceControlPage> {
         .replaceAll('tele vision', 'tv')
         .replaceAll('washing machine', 'washer');
 
-    processedText = processedText
-        .replaceAllMapped(
-          RegExp(r'\b(turn)?\s*(on|off)\s*(?:the)?\s*(light|fan)\s*(\d*)\b'),
-          (m) => 'turn ${m[2]} ${m[3]}${m[4]?.isNotEmpty == true ? " ${m[4]}" : ""}'.trim(),
-        )
-        .replaceAll(RegExp(r'\s+'), ' ')
-        .trim();
+    processedText =
+        processedText
+            .replaceAllMapped(
+              RegExp(
+                r'\b(turn)?\s*(on|off)\s*(?:the)?\s*(light|fan)\s*(\d*)\b',
+              ),
+              (m) =>
+                  'turn ${m[2]} ${m[3]}${m[4]?.isNotEmpty == true ? " ${m[4]}" : ""}'
+                      .trim(),
+            )
+            .replaceAll(RegExp(r'\s+'), ' ')
+            .trim();
 
     print('Processed text: $processedText');
 
@@ -178,16 +194,18 @@ class _VoiceControlPageState extends State<VoiceControlPage> {
     if (lightMatch != null) {
       final lightNumber = int.tryParse(lightMatch.group(1)!);
       if (lightNumber == null || lightNumber < 1 || lightNumber > 3) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('No such light')),
-        );
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(const SnackBar(content: Text('No such light')));
         await _speak("Sorry, no such light");
         return;
       }
     }
-    
+
     final commandPatterns = [
-      RegExp(r'\b(turn|switch|put|set)\s+(on|off)\s+(?:the\s+)?(light|fan|tv|ac|washer|fridge)(?:\s+(\d+))?\b'),
+      RegExp(
+        r'\b(turn|switch|put|set)\s+(on|off)\s+(?:the\s+)?(light|fan|tv|ac|washer|fridge)(?:\s+(\d+))?\b',
+      ),
       RegExp(r'\b(light|fan|tv|ac|washer|fridge)(?:\s+(\d+))?\s+(on|off)\b'),
       RegExp(r'\b(light|fan|tv|ac|washer|fridge)\s+(on|off)\b'),
       RegExp(r'\b(turn|switch)\s+(on|off)\s+(\d+)\s+(light|fan)\b'),
@@ -207,7 +225,7 @@ class _VoiceControlPageState extends State<VoiceControlPage> {
         if (restructured) break;
       }
     }
-    
+
     processedText = processedText
         .replaceAll(RegExp(r'\s+'), ' ')
         .trim()
@@ -218,7 +236,9 @@ class _VoiceControlPageState extends State<VoiceControlPage> {
 
     print('Processed text: $processedText');
 
-    if (!processedText.contains(RegExp(r'\b(light|fan|ac|fridge|washer|tv)\b'))) {
+    if (!processedText.contains(
+      RegExp(r'\b(light|fan|ac|fridge|washer|tv)\b'),
+    )) {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Column(
@@ -249,7 +269,10 @@ class _VoiceControlPageState extends State<VoiceControlPage> {
       await _speak("Sorry, I didn't understand. Please try again");
       return;
     }
-
+    if (processedText.isEmpty) {
+      await _speak("No command detected");
+      return;
+    }
     final commandMap = {
       'turn on light 1': 'LIGHT1_ON',
       'turn on light 2': 'LIGHT2_ON',
@@ -359,13 +382,16 @@ class _VoiceControlPageState extends State<VoiceControlPage> {
     try {
       await _stopListening();
 
-      // Start PocketSphinx with simplified parameters
+      // In _listenVoiceCommand()
       _recognitionProcess = await Process.start('pocketsphinx_continuous', [
         '-inmic',
         'yes',
-        '-time', 'yes',
+        '-adcdev', 'default', // Explicitly specify device
         '-logfn', '/dev/null',
-        '-kws_threshold', '1e-20',
+        '-kws_threshold', '1e-5', // More reasonable threshold
+        '-hmm', '/usr/share/pocketsphinx/model/en-us/en-us', // Specify model
+        '-dict',
+        '/usr/share/pocketsphinx/model/en-us/cmudict-en-us.dict', // Dictionary
       ]);
 
       // Capture exit code
@@ -379,7 +405,7 @@ class _VoiceControlPageState extends State<VoiceControlPage> {
       // Handle errors
       _recognitionProcess!.stderr.transform(utf8.decoder).listen((data) {
         print('PocketSphinx stderr: $data');
-        if (data.contains('Failed to open audio device') || 
+        if (data.contains('Failed to open audio device') ||
             data.contains('No such entity')) {
           setState(() => _audioError = true);
         }
@@ -390,24 +416,23 @@ class _VoiceControlPageState extends State<VoiceControlPage> {
           .transform(utf8.decoder)
           .transform(const LineSplitter())
           .listen((line) {
-        print('PocketSphinx: $line');
-        if (line.contains('detected')) {
-          final startIndex = line.indexOf('detected') + 9;
-          setState(() => _spokenText = line.substring(startIndex).trim());
-        }
-        else if (line.contains(':')) {
-          final parts = line.split(':');
-          if (parts.length > 1) {
-            setState(() => _spokenText = parts[1].trim());
-          }
-        }
-      });
+            print('PocketSphinx: $line');
+            if (line.contains('detected')) {
+              final startIndex = line.indexOf('detected') + 9;
+              setState(() => _spokenText = line.substring(startIndex).trim());
+            } else if (line.contains(':')) {
+              final parts = line.split(':');
+              if (parts.length > 1) {
+                setState(() => _spokenText = parts[1].trim());
+              }
+            }
+          });
 
       // Set timeout
       _listeningTimer = Timer(const Duration(seconds: 15), () async {
         await _stopListening();
-        if (_spokenText.isNotEmpty && 
-            _spokenText != "Listening..." && 
+        if (_spokenText.isNotEmpty &&
+            _spokenText != "Listening..." &&
             !_audioError) {
           _processVoiceCommand(_spokenText);
         } else if (_audioError) {
@@ -426,12 +451,17 @@ class _VoiceControlPageState extends State<VoiceControlPage> {
     _listeningTimer?.cancel();
 
     if (_recognitionProcess != null) {
-      _recognitionProcess!.kill(ProcessSignal.sigint);
-      await Future.delayed(const Duration(milliseconds: 500));
-      if (_recognitionProcess != null) {
-        _recognitionProcess!.kill();
+      try {
+        _recognitionProcess!.kill(ProcessSignal.sigterm);
+        await _recognitionProcess!.exitCode.timeout(
+          const Duration(seconds: 1),
+          onTimeout: () => -1,
+        );
+      } catch (e) {
+        print('Error stopping process: $e');
+      } finally {
+        _recognitionProcess = null;
       }
-      _recognitionProcess = null;
     }
   }
 
@@ -468,161 +498,206 @@ class _VoiceControlPageState extends State<VoiceControlPage> {
           vertical: isLargeScreen ? 40 : 16,
           horizontal: isLargeScreen ? 30 : 16,
         ),
-        child: cameraIDs.isEmpty
-            ? Center(
-                child: Text(
-                  'No Device configured',
-                  style: TextStyle(
-                    color: Colors.white70,
-                    fontSize: isLargeScreen ? 24 : 16,
+        child:
+            cameraIDs.isEmpty
+                ? Center(
+                  child: Text(
+                    'No Device configured',
+                    style: TextStyle(
+                      color: Colors.white70,
+                      fontSize: isLargeScreen ? 24 : 16,
+                    ),
+                  ),
+                )
+                : Center(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      if (isLargeScreen) const SizedBox(height: 30),
+                      Center(
+                        child: Text(
+                          'Tap to speak command',
+                          style: TextStyle(
+                            color: Colors.tealAccent,
+                            fontSize: isLargeScreen ? 26 : 18,
+                            fontWeight: FontWeight.w500,
+                          ),
+                        ),
+                      ),
+                      SizedBox(height: isLargeScreen ? 70 : 55),
+                      Center(
+                        child: GestureDetector(
+                          onTap:
+                              _isListening
+                                  ? _stopListening
+                                  : _listenVoiceCommand,
+                          child: AnimatedScale(
+                            scale: _isListening ? 1.5 : 1.0,
+                            duration: const Duration(milliseconds: 600),
+                            curve: Curves.easeInOut,
+                            child: Container(
+                              width: isLargeScreen ? 180 : 120,
+                              height: isLargeScreen ? 180 : 120,
+                              decoration: BoxDecoration(
+                                shape: BoxShape.circle,
+                                color:
+                                    _audioError
+                                        ? Colors.orange
+                                        : (_isListening
+                                            ? Colors.greenAccent
+                                            : Colors.tealAccent),
+                                boxShadow:
+                                    _isListening
+                                        ? [
+                                          BoxShadow(
+                                            color: (_audioError
+                                                    ? Colors.orange
+                                                    : Colors.greenAccent)
+                                                .withOpacity(0.6),
+                                            spreadRadius:
+                                                isLargeScreen ? 15 : 10,
+                                            blurRadius: isLargeScreen ? 30 : 20,
+                                          ),
+                                        ]
+                                        : [],
+                              ),
+                              child:
+                                  _audioError
+                                      ? const Icon(
+                                        Icons.warning,
+                                        size: 50,
+                                        color: Colors.black,
+                                      )
+                                      : const Icon(
+                                        Icons.mic,
+                                        size: 50,
+                                        color: Colors.black,
+                                      ),
+                            ),
+                          ),
+                        ),
+                      ),
+                      SizedBox(height: isLargeScreen ? 70 : 55),
+                      Center(
+                        child: Container(
+                          padding: const EdgeInsets.all(16),
+                          decoration: BoxDecoration(
+                            color: Colors.grey[900],
+                            borderRadius: BorderRadius.circular(16),
+                          ),
+                          child: Text(
+                            _spokenText.isEmpty
+                                ? (_audioError
+                                    ? "Audio device error!"
+                                    : "Say a command...")
+                                : _spokenText,
+                            textAlign: TextAlign.center,
+                            style: TextStyle(
+                              color: _audioError ? Colors.orange : Colors.white,
+                              fontSize: isLargeScreen ? 26 : 18,
+                              fontWeight: FontWeight.w400,
+                            ),
+                          ),
+                        ),
+                      ),
+                      const Spacer(),
+                      if (isLargeScreen)
+                        Center(
+                          child: Padding(
+                            padding: const EdgeInsets.only(bottom: 30),
+                            child: Column(
+                              children: [
+                                Text(
+                                  'Supported commands: light, fan, TV, AC, washer, fridge',
+                                  style: TextStyle(
+                                    color: Colors.grey[500],
+                                    fontSize: 20,
+                                    fontStyle: FontStyle.italic,
+                                  ),
+                                ),
+                                const SizedBox(height: 10),
+                                if (_audioError)
+                                  Padding(
+                                    padding: const EdgeInsets.symmetric(
+                                      vertical: 12.0,
+                                    ),
+                                    child: Container(
+                                      padding: const EdgeInsets.all(16),
+                                      decoration: BoxDecoration(
+                                        color: Colors.orange[900],
+                                        borderRadius: BorderRadius.circular(12),
+                                      ),
+                                      child: Column(
+                                        crossAxisAlignment:
+                                            CrossAxisAlignment.start,
+                                        mainAxisSize: MainAxisSize.min,
+                                        children: [
+                                          const Text(
+                                            "Audio Configuration Required",
+                                            style: TextStyle(
+                                              fontWeight: FontWeight.bold,
+                                              color: Colors.white,
+                                              fontSize: 18,
+                                            ),
+                                          ),
+                                          const SizedBox(height: 10),
+                                          const Text(
+                                            "1. Install required packages:",
+                                            style: TextStyle(
+                                              color: Colors.white70,
+                                            ),
+                                          ),
+                                          const SelectableText(
+                                            "sudo apt-get install pocketsphinx pocketsphinx-en-us",
+                                            style: TextStyle(
+                                              color: Colors.white,
+                                            ),
+                                          ),
+                                          const SizedBox(height: 10),
+                                          const Text(
+                                            "2. Test microphone:",
+                                            style: TextStyle(
+                                              color: Colors.white70,
+                                            ),
+                                          ),
+                                          const SelectableText(
+                                            "arecord -l",
+                                            style: TextStyle(
+                                              color: Colors.white,
+                                            ),
+                                          ),
+                                          const SizedBox(height: 20),
+                                          ElevatedButton(
+                                            onPressed: _testAudioInput,
+                                            child: const Text(
+                                              "Retry Detection",
+                                            ),
+                                          ),
+                                        ],
+                                      ),
+                                    ),
+                                  ),
+                              ],
+                            ),
+                          ),
+                        ),
+                      if (isLargeScreen)
+                        Center(
+                          child: Padding(
+                            padding: const EdgeInsets.only(bottom: 10),
+                            child: Text(
+                              'Using PocketSphinx & eSpeak',
+                              style: TextStyle(
+                                color: Colors.grey[700],
+                                fontSize: 16,
+                                fontStyle: FontStyle.italic,
+                              ),
+                            ),
+                          ),
+                        ),
+                    ],
                   ),
                 ),
-              )
-            : Center(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    if (isLargeScreen) const SizedBox(height: 30),
-                    Center(
-                      child: Text(
-                        'Tap to speak command',
-                        style: TextStyle(
-                          color: Colors.tealAccent,
-                          fontSize: isLargeScreen ? 26 : 18,
-                          fontWeight: FontWeight.w500,
-                        ),
-                      ),
-                    ),
-                    SizedBox(height: isLargeScreen ? 70 : 55),
-                    Center(
-                      child: GestureDetector(
-                        onTap: _isListening ? _stopListening : _listenVoiceCommand,
-                        child: AnimatedScale(
-                          scale: _isListening ? 1.5 : 1.0,
-                          duration: const Duration(milliseconds: 600),
-                          curve: Curves.easeInOut,
-                          child: Container(
-                            width: isLargeScreen ? 180 : 120,
-                            height: isLargeScreen ? 180 : 120,
-                            decoration: BoxDecoration(
-                              shape: BoxShape.circle,
-                              color: _audioError 
-                                  ? Colors.orange 
-                                  : (_isListening ? Colors.greenAccent : Colors.tealAccent),
-                              boxShadow: _isListening
-                                  ? [
-                                      BoxShadow(
-                                        color: (_audioError 
-                                            ? Colors.orange 
-                                            : Colors.greenAccent)
-                                            .withOpacity(0.6),
-                                        spreadRadius: isLargeScreen ? 15 : 10,
-                                        blurRadius: isLargeScreen ? 30 : 20,
-                                      ),
-                                    ]
-                                  : [],
-                            ),
-                            child: _audioError
-                                ? const Icon(
-                                    Icons.warning,
-                                    size: 50,
-                                    color: Colors.black,
-                                  )
-                                : const Icon(
-                                    Icons.mic,
-                                    size: 50,
-                                    color: Colors.black,
-                                  ),
-                          ),
-                        ),
-                      ),
-                    ),
-                    SizedBox(height: isLargeScreen ? 70 : 55),
-                    Center(
-                      child: Container(
-                        padding: const EdgeInsets.all(16),
-                        decoration: BoxDecoration(
-                          color: Colors.grey[900],
-                          borderRadius: BorderRadius.circular(16),
-                        ),
-                        child: Text(
-                          _spokenText.isEmpty 
-                              ? (_audioError ? "Audio device error!" : "Say a command...") 
-                              : _spokenText,
-                          textAlign: TextAlign.center,
-                          style: TextStyle(
-                            color: _audioError ? Colors.orange : Colors.white,
-                            fontSize: isLargeScreen ? 26 : 18,
-                            fontWeight: FontWeight.w400,
-                          ),
-                        ),
-                      ),
-                    ),
-                    const Spacer(),
-                    if (isLargeScreen)
-                      Center(
-                        child: Padding(
-                          padding: const EdgeInsets.only(bottom: 30),
-                          child: Column(
-                            children: [
-                              Text(
-                                'Supported commands: light, fan, TV, AC, washer, fridge',
-                                style: TextStyle(
-                                  color: Colors.grey[500],
-                                  fontSize: 20,
-                                  fontStyle: FontStyle.italic,
-                                ),
-                              ),
-                              const SizedBox(height: 10),
-                              if (_audioError)
-                                Column(
-                                  children: [
-                                    Text(
-                                      'Audio configuration issue',
-                                      style: TextStyle(
-                                        color: Colors.orange,
-                                        fontSize: 18,
-                                        fontWeight: FontWeight.bold,
-                                      ),
-                                    ),
-                                    const SizedBox(height: 8),
-                                    Text(
-                                      'Run: sudo apt-get install alsa-utils',
-                                      style: TextStyle(
-                                        color: Colors.white,
-                                        fontSize: 16,
-                                      ),
-                                    ),
-                                    Text(
-                                      'Then: arecord -l',
-                                      style: TextStyle(
-                                        color: Colors.white,
-                                        fontSize: 16,
-                                      ),
-                                    ),
-                                  ],
-                                ),
-                            ],
-                          ),
-                        ),
-                      ),
-                    if (isLargeScreen)
-                      Center(
-                        child: Padding(
-                          padding: const EdgeInsets.only(bottom: 10),
-                          child: Text(
-                            'Using PocketSphinx & eSpeak',
-                            style: TextStyle(
-                              color: Colors.grey[700],
-                              fontSize: 16,
-                              fontStyle: FontStyle.italic,
-                            ),
-                          ),
-                        ),
-                      ),
-                  ],
-                ),
-              ),
       ),
     );
   }
