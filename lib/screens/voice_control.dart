@@ -43,9 +43,9 @@ class _VoiceControlPageState extends State<VoiceControlPage> {
 
   Future<void> _sendCommand(String cmd) async {
     if (cameraIDs.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('No camera devices found')),
-      );
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('No camera devices found')));
       return;
     }
 
@@ -162,9 +162,9 @@ class _VoiceControlPageState extends State<VoiceControlPage> {
     if (lightMatch != null) {
       final lightNumber = int.tryParse(lightMatch.group(1)!);
       if (lightNumber == null || lightNumber < 1 || lightNumber > 3) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('No such light')),
-        );
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(const SnackBar(content: Text('No such light')));
         await _speak("Sorry, no such light");
         return;
       }
@@ -346,9 +346,9 @@ class _VoiceControlPageState extends State<VoiceControlPage> {
       _ttsProcess = await Process.start('espeak', ['-ven+f3', text]);
     } catch (e) {
       print('Error with TTS: $e');
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Text-to-speech error: $e')),
-      );
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('Text-to-speech error: $e')));
     }
   }
 
@@ -379,7 +379,7 @@ class _VoiceControlPageState extends State<VoiceControlPage> {
         '1',
         '-D',
         'plughw:0,0', // Updated to use plughw:0,0
-        fifoPath
+        fifoPath,
       ]);
 
       // Start pocketsphinx to read from FIFO
@@ -389,7 +389,7 @@ class _VoiceControlPageState extends State<VoiceControlPage> {
         '-time',
         'yes',
         '-logfn',
-        '/dev/null'
+        '/dev/null',
       ]);
 
       // Listen for output from pocketsphinx
@@ -397,12 +397,12 @@ class _VoiceControlPageState extends State<VoiceControlPage> {
           .transform(utf8.decoder)
           .transform(const LineSplitter())
           .listen((line) {
-        if (line.startsWith('READY....')) return;
-        if (line.contains('000000000: ')) {
-          final text = line.split(': ')[1].trim();
-          setState(() => _spokenText = text);
-        }
-      });
+            if (line.startsWith('READY....')) return;
+            if (line.contains('000000000: ')) {
+              final text = line.split(': ')[1].trim();
+              setState(() => _spokenText = text);
+            }
+          });
 
       // Set timeout for listening
       _listeningTimer = Timer(const Duration(seconds: 6), () async {
@@ -418,26 +418,26 @@ class _VoiceControlPageState extends State<VoiceControlPage> {
         _isListening = false;
         _spokenText = "Error: Speech recognition failed";
       });
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Speech recognition error: $e')),
-      );
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('Speech recognition error: $e')));
     }
   }
 
   Future<void> _stopListening() async {
     setState(() => _isListening = false);
     _listeningTimer?.cancel();
-    
+
     if (_recognitionProcess != null) {
       _recognitionProcess!.kill();
       _recognitionProcess = null;
     }
-    
+
     if (_arecordProcess != null) {
       _arecordProcess!.kill();
       _arecordProcess = null;
     }
-    
+
     // Clean up FIFO
     await Process.run('rm', ['-f', '/tmp/voice_fifo']);
   }
@@ -477,117 +477,127 @@ class _VoiceControlPageState extends State<VoiceControlPage> {
           vertical: isLargeScreen ? 40 : 16,
           horizontal: isLargeScreen ? 30 : 16,
         ),
-        child: cameraIDs.isEmpty
-            ? Center(
-                child: Text(
-                  'No Device configured',
-                  style: TextStyle(
-                    color: Colors.white70,
-                    fontSize: isLargeScreen ? 24 : 16,
+        child:
+            cameraIDs.isEmpty
+                ? Center(
+                  child: Text(
+                    'No Device configured',
+                    style: TextStyle(
+                      color: Colors.white70,
+                      fontSize: isLargeScreen ? 24 : 16,
+                    ),
+                  ),
+                )
+                : Center(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      if (isLargeScreen) const SizedBox(height: 30),
+                      Center(
+                        child: Text(
+                          'Tap to speak command',
+                          style: TextStyle(
+                            color: Colors.tealAccent,
+                            fontSize: isLargeScreen ? 26 : 18,
+                            fontWeight: FontWeight.w500,
+                          ),
+                        ),
+                      ),
+                      SizedBox(height: isLargeScreen ? 70 : 55),
+                      Center(
+                        child: GestureDetector(
+                          onTap:
+                              _isListening
+                                  ? _stopListening
+                                  : _listenVoiceCommand,
+                          child: AnimatedScale(
+                            scale: _isListening ? 1.5 : 1.0,
+                            duration: const Duration(milliseconds: 600),
+                            curve: Curves.easeInOut,
+                            child: Container(
+                              width: isLargeScreen ? 180 : 120,
+                              height: isLargeScreen ? 180 : 120,
+                              decoration: BoxDecoration(
+                                shape: BoxShape.circle,
+                                color:
+                                    _isListening
+                                        ? Colors.greenAccent
+                                        : Colors.tealAccent,
+                                boxShadow:
+                                    _isListening
+                                        ? [
+                                          BoxShadow(
+                                            color: Colors.greenAccent
+                                                .withOpacity(0.6),
+                                            spreadRadius:
+                                                isLargeScreen ? 15 : 10,
+                                            blurRadius: isLargeScreen ? 30 : 20,
+                                          ),
+                                        ]
+                                        : [],
+                              ),
+                              child: Icon(
+                                Icons.mic,
+                                size: isLargeScreen ? 70 : 50,
+                                color: Colors.black,
+                              ),
+                            ),
+                          ),
+                        ),
+                      ),
+                      SizedBox(height: isLargeScreen ? 70 : 55),
+                      Center(
+                        child: Container(
+                          padding: const EdgeInsets.all(16),
+                          decoration: BoxDecoration(
+                            color: Colors.grey[900],
+                            borderRadius: BorderRadius.circular(16),
+                          ),
+                          child: Text(
+                            _spokenText.isEmpty
+                                ? "Say a command..."
+                                : _spokenText,
+                            textAlign: TextAlign.center,
+                            style: TextStyle(
+                              color: Colors.white,
+                              fontSize: isLargeScreen ? 26 : 18,
+                              fontWeight: FontWeight.w400,
+                            ),
+                          ),
+                        ),
+                      ),
+                      const Spacer(),
+                      if (isLargeScreen)
+                        Center(
+                          child: Padding(
+                            padding: const EdgeInsets.only(bottom: 30),
+                            child: Text(
+                              'Supported commands: light, fan, TV, AC, washer, fridge',
+                              style: TextStyle(
+                                color: Colors.grey[500],
+                                fontSize: 20,
+                                fontStyle: FontStyle.italic,
+                              ),
+                            ),
+                          ),
+                        ),
+                      if (isLargeScreen)
+                        Center(
+                          child: Padding(
+                            padding: const EdgeInsets.only(bottom: 10),
+                            child: Text(
+                              'Using PocketSphinx & eSpeak',
+                              style: TextStyle(
+                                color: Colors.grey[700],
+                                fontSize: 16,
+                                fontStyle: FontStyle.italic,
+                              ),
+                            ),
+                          ),
+                        ),
+                    ],
                   ),
                 ),
-              )
-            : Center(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    if (isLargeScreen) const SizedBox(height: 30),
-                    Center(
-                      child: Text(
-                        'Tap to speak command',
-                        style: TextStyle(
-                          color: Colors.tealAccent,
-                          fontSize: isLargeScreen ? 26 : 18,
-                          fontWeight: FontWeight.w500,
-                        ),
-                      ),
-                    ),
-                    SizedBox(height: isLargeScreen ? 70 : 55),
-                    Center(
-                      child: GestureDetector(
-                        onTap:
-                            _isListening ? _stopListening : _listenVoiceCommand,
-                        child: AnimatedScale(
-                          scale: _isListening ? 1.5 : 1.0,
-                          duration: const Duration(milliseconds: 600),
-                          curve: Curves.easeInOut,
-                          child: Container(
-                            width: isLargeScreen ? 180 : 120,
-                            height: isLargeScreen ? 180 : 120,
-                            decoration: BoxDecoration(
-                              shape: BoxShape.circle,
-                              color:
-                                  _isListening ? Colors.greenAccent : Colors.tealAccent,
-                              boxShadow: _isListening
-                                  ? [
-                                      BoxShadow(
-                                        color: Colors.greenAccent.withOpacity(0.6),
-                                        spreadRadius: isLargeScreen ? 15 : 10,
-                                        blurRadius: isLargeScreen ? 30 : 20,
-                                      ),
-                                    ]
-                                  : [],
-                            ),
-                            child: Icon(
-                              Icons.mic,
-                              size: isLargeScreen ? 70 : 50,
-                              color: Colors.black,
-                            ),
-                          ),
-                        ),
-                      ),
-                    ),
-                    SizedBox(height: isLargeScreen ? 70 : 55),
-                    Center(
-                      child: Container(
-                        padding: const EdgeInsets.all(16),
-                        decoration: BoxDecoration(
-                          color: Colors.grey[900],
-                          borderRadius: BorderRadius.circular(16),
-                        ),
-                        child: Text(
-                          _spokenText.isEmpty ? "Say a command..." : _spokenText,
-                          textAlign: TextAlign.center,
-                          style: TextStyle(
-                            color: Colors.white,
-                            fontSize: isLargeScreen ? 26 : 18,
-                            fontWeight: FontWeight.w400,
-                          ),
-                        ),
-                      ),
-                    ),
-                    const Spacer(),
-                    if (isLargeScreen)
-                      Center(
-                        child: Padding(
-                          padding: const EdgeInsets.only(bottom: 30),
-                          child: Text(
-                            'Supported commands: light, fan, TV, AC, washer, fridge',
-                            style: TextStyle(
-                              color: Colors.grey[500],
-                              fontSize: 20,
-                              fontStyle: FontStyle.italic,
-                            ),
-                          ),
-                        ),
-                      ),
-                    if (isLargeScreen)
-                      Center(
-                        child: Padding(
-                          padding: const EdgeInsets.only(bottom: 10),
-                          child: Text(
-                            'Using PocketSphinx & eSpeak',
-                            style: TextStyle(
-                              color: Colors.grey[700],
-                              fontSize: 16,
-                              fontStyle: FontStyle.italic,
-                            ),
-                          ),
-                        ),
-                      ),
-                  ],
-                ),
-              ),
       ),
     );
   }
