@@ -24,7 +24,7 @@ class _VoiceControlPageState extends State<VoiceControlPage> {
   Process? _recognitionProcess;
   Process? _ttsProcess;
   Timer? _listeningTimer;
-  Process? _arecordProcess;
+  bool _audioError = false;
 
   @override
   void initState() {
@@ -335,56 +335,32 @@ class _VoiceControlPageState extends State<VoiceControlPage> {
     setState(() {
       _isListening = true;
       _spokenText = "Listening...";
+      _audioError = false;
     });
 
     try {
       await _stopListening();
 
-      // Start PocketSphinx
+      // Start PocketSphinx with direct microphone access
       _recognitionProcess = await Process.start('pocketsphinx_continuous', [
-        '-inmic', 'no',
-        '-infile', '/dev/stdin',
-        '-time', 'yes',
-        '-logfn', '/dev/null',
-        '-adcdev', 'default',
+        '-inmic',
+        'yes',
+        '-time',
+        'yes',
+        '-logfn',
+        '/dev/null',
       ]);
 
       // Debug output
       _recognitionProcess!.stderr.transform(utf8.decoder).listen((data) {
         print('PocketSphinx stderr: $data');
+        if (data.contains('Failed to open audio device')) {
+          setState(() {
+            _audioError = true;
+            _spokenText = "Audio device error";
+          });
+        }
       });
-
-      // Start audio recording with fallback device
-      try {
-        _arecordProcess = await Process.start('arecord', [
-          '-t', 'raw',
-          '-f', 'S16_LE',
-          '-r', '16000',
-          '-c', '1',
-          '-D', 'plughw:0,0',
-          '-q',
-          '-',
-        ]);
-      } catch (hwError) {
-        print('Hardware device error: $hwError. Trying default device...');
-        _arecordProcess = await Process.start('arecord', [
-          '-t', 'raw',
-          '-f', 'S16_LE',
-          '-r', '16000',
-          '-c', '1',
-          '-D', 'default',
-          '-q',
-          '-',
-        ]);
-      }
-
-      // Debug output for arecord
-      _arecordProcess!.stderr.transform(utf8.decoder).listen((data) {
-        print('arecord stderr: $data');
-      });
-
-      // Pipe audio to PocketSphinx
-      _arecordProcess!.stdout.pipe(_recognitionProcess!.stdin);
 
       // Handle PocketSphinx output
       _recognitionProcess!.stdout
@@ -408,8 +384,12 @@ class _VoiceControlPageState extends State<VoiceControlPage> {
       // Set timeout
       _listeningTimer = Timer(const Duration(seconds: 6), () async {
         await _stopListening();
-        if (_spokenText.isNotEmpty && _spokenText != "Listening...") {
+        if (_spokenText.isNotEmpty && 
+            _spokenText != "Listening..." && 
+            !_audioError) {
           _processVoiceCommand(_spokenText);
+        } else if (_audioError) {
+          await _speak("Audio device error. Please check microphone");
         }
         setState(() => _spokenText = "");
       });
@@ -430,13 +410,13 @@ class _VoiceControlPageState extends State<VoiceControlPage> {
     _listeningTimer?.cancel();
 
     if (_recognitionProcess != null) {
-      _recognitionProcess!.kill();
+      // Send SIGINT for graceful termination
+      _recognitionProcess!.kill(ProcessSignal.sigint);
+      await Future.delayed(const Duration(milliseconds: 500));
+      if (_recognitionProcess != null) {
+        _recognitionProcess!.kill();
+      }
       _recognitionProcess = null;
-    }
-
-    if (_arecordProcess != null) {
-      _arecordProcess!.kill();
-      _arecordProcess = null;
     }
   }
 
@@ -511,11 +491,16 @@ class _VoiceControlPageState extends State<VoiceControlPage> {
                             height: isLargeScreen ? 180 : 120,
                             decoration: BoxDecoration(
                               shape: BoxShape.circle,
-                              color: _isListening ? Colors.greenAccent : Colors.tealAccent,
+                              color: _isListening 
+                                  ? _audioError ? Colors.orange : Colors.greenAccent 
+                                  : Colors.tealAccent,
                               boxShadow: _isListening
                                   ? [
                                       BoxShadow(
-                                        color: Colors.greenAccent.withOpacity(0.6),
+                                        color: (_audioError 
+                                            ? Colors.orange 
+                                            : Colors.greenAccent)
+                                            .withOpacity(0.6),
                                         spreadRadius: isLargeScreen ? 15 : 10,
                                         blurRadius: isLargeScreen ? 30 : 20,
                                       ),
@@ -543,7 +528,7 @@ class _VoiceControlPageState extends State<VoiceControlPage> {
                           _spokenText.isEmpty ? "Say a command..." : _spokenText,
                           textAlign: TextAlign.center,
                           style: TextStyle(
-                            color: Colors.white,
+                            color: _audioError ? Colors.orange : Colors.white,
                             fontSize: isLargeScreen ? 26 : 18,
                             fontWeight: FontWeight.w400,
                           ),
@@ -555,13 +540,27 @@ class _VoiceControlPageState extends State<VoiceControlPage> {
                       Center(
                         child: Padding(
                           padding: const EdgeInsets.only(bottom: 30),
-                          child: Text(
-                            'Supported commands: light, fan, TV, AC, washer, fridge',
-                            style: TextStyle(
-                              color: Colors.grey[500],
-                              fontSize: 20,
-                              fontStyle: FontStyle.italic,
-                            ),
+                          child: Column(
+                            children: [
+                              Text(
+                                'Supported commands: light, fan, TV, AC, washer, fridge',
+                                style: TextStyle(
+                                  color: Colors.grey[500],
+                                  fontSize: 20,
+                                  fontStyle: FontStyle.italic,
+                                ),
+                              ),
+                              const SizedBox(height: 10),
+                              if (_audioError)
+                                Text(
+                                  'Audio device busy! Close other audio apps',
+                                  style: TextStyle(
+                                    color: Colors.orange,
+                                    fontSize: 18,
+                                    fontWeight: FontWeight.bold,
+                                  ),
+                                ),
+                            ],
                           ),
                         ),
                       ),
