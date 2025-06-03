@@ -30,24 +30,22 @@ class _VoiceControlPageState extends State<VoiceControlPage> {
   void initState() {
     super.initState();
     _loadCameraIDs();
-    _testAudioInput();  // Test microphone on startup
+    _testAudioInput();
   }
 
   Future<void> _testAudioInput() async {
     try {
       final result = await Process.run(
         'arecord', 
-        ['-d', '2', '--format=S16_LE', '--rate=16000', '--file-type=raw', '/dev/null']
+        ['--device', 'default', '-d', '1', '--format=S16_LE', '--rate=16000', '--file-type=raw', '/dev/null']
       );
       if (result.exitCode != 0) {
-        setState(() {
-          _audioError = true;
-        });
-        await _speak("Microphone not detected. Please check audio settings.");
+        setState(() => _audioError = true);
+        print('Microphone test failed: ${result.stderr}');
       }
     } catch (e) {
       setState(() => _audioError = true);
-      print('Audio test failed: $e');
+      print('Audio test error: $e');
     }
   }
 
@@ -343,10 +341,7 @@ class _VoiceControlPageState extends State<VoiceControlPage> {
       }
       _ttsProcess = await Process.start('espeak', ['-ven+f3', text]);
     } catch (e) {
-      print('Error with TTS: $e');
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Text-to-speech error: $e')),
-      );
+      print('TTS error: $e');
     }
   }
 
@@ -359,58 +354,43 @@ class _VoiceControlPageState extends State<VoiceControlPage> {
     setState(() {
       _isListening = true;
       _spokenText = "Listening...";
-      _audioError = false;
     });
 
     try {
       await _stopListening();
 
-      // Initialize audio system
-      try {
-        await Process.run('pulseaudio', ['--start']);
-        await Process.run('pacmd', ['set-default-source', 'alsa_input.pci-0000_00_1f.3.analog-stereo']);
-      } catch (e) {
-        print('Audio init error: $e');
-      }
-
-      // Start PocketSphinx with improved parameters
+      // Start PocketSphinx with simplified parameters
       _recognitionProcess = await Process.start('pocketsphinx_continuous', [
         '-inmic',
         'yes',
-        '-adcdev', 'default',
         '-time', 'yes',
         '-logfn', '/dev/null',
         '-kws_threshold', '1e-20',
       ]);
 
-      // Capture process exit code
+      // Capture exit code
       _recognitionProcess!.exitCode.then((code) {
-        if (code != 0) {
-          setState(() {
-            _audioError = true;
-            _spokenText = "Recognition error";
-          });
+        print('PocketSphinx exited with code: $code');
+        if (code != 0 && !_isListening) {
+          setState(() => _audioError = true);
         }
       });
 
-      // Debug output
+      // Handle errors
       _recognitionProcess!.stderr.transform(utf8.decoder).listen((data) {
         print('PocketSphinx stderr: $data');
-        if (data.contains('Failed to open audio device')) {
-          setState(() {
-            _audioError = true;
-            _spokenText = "Audio device error";
-          });
+        if (data.contains('Failed to open audio device') || 
+            data.contains('No such entity')) {
+          setState(() => _audioError = true);
         }
       });
 
-      // Handle PocketSphinx output
+      // Process output
       _recognitionProcess!.stdout
           .transform(utf8.decoder)
           .transform(const LineSplitter())
           .listen((line) {
         print('PocketSphinx: $line');
-        
         if (line.contains('detected')) {
           final startIndex = line.indexOf('detected') + 9;
           setState(() => _spokenText = line.substring(startIndex).trim());
@@ -419,13 +399,11 @@ class _VoiceControlPageState extends State<VoiceControlPage> {
           final parts = line.split(':');
           if (parts.length > 1) {
             setState(() => _spokenText = parts[1].trim());
-          } else {
-            setState(() => _spokenText = line);
           }
         }
       });
 
-      // Set longer timeout
+      // Set timeout
       _listeningTimer = Timer(const Duration(seconds: 15), () async {
         await _stopListening();
         if (_spokenText.isNotEmpty && 
@@ -438,15 +416,8 @@ class _VoiceControlPageState extends State<VoiceControlPage> {
         setState(() => _spokenText = "");
       });
     } catch (e) {
-      print('Error with speech recognition: $e');
-      setState(() {
-        _isListening = false;
-        _audioError = true;
-        _spokenText = "Recognition failed";
-      });
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Speech recognition error: $e')),
-      );
+      print('Recognition error: $e');
+      setState(() => _audioError = true);
     }
   }
 
@@ -604,13 +575,32 @@ class _VoiceControlPageState extends State<VoiceControlPage> {
                               ),
                               const SizedBox(height: 10),
                               if (_audioError)
-                                Text(
-                                  'Audio device busy! Close other audio apps',
-                                  style: TextStyle(
-                                    color: Colors.orange,
-                                    fontSize: 18,
-                                    fontWeight: FontWeight.bold,
-                                  ),
+                                Column(
+                                  children: [
+                                    Text(
+                                      'Audio configuration issue',
+                                      style: TextStyle(
+                                        color: Colors.orange,
+                                        fontSize: 18,
+                                        fontWeight: FontWeight.bold,
+                                      ),
+                                    ),
+                                    const SizedBox(height: 8),
+                                    Text(
+                                      'Run: sudo apt-get install alsa-utils',
+                                      style: TextStyle(
+                                        color: Colors.white,
+                                        fontSize: 16,
+                                      ),
+                                    ),
+                                    Text(
+                                      'Then: arecord -l',
+                                      style: TextStyle(
+                                        color: Colors.white,
+                                        fontSize: 16,
+                                      ),
+                                    ),
+                                  ],
                                 ),
                             ],
                           ),
